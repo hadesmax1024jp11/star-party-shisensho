@@ -341,29 +341,35 @@ const S = {
 const $ = id => document.getElementById(id);
 const boardEl = $("board"), pathSvg = $("pathSvg");
 
-/* ================= 連通判定（≤2 轉彎，跨層配對） =================
+/* ================= 連通判定（≤2 轉彎，分層路徑） =================
    grids[l]: (rows+2)x(cols+2)，外圈為空。0=空、其他=牌面編號
-   規則：任兩張「曝露」的相同牌即可配對（上下層可互相消除）。
-   路徑只能通過完全淨空的格子（上下層皆無牌）。
+   規則：任兩張「曝露」的相同牌即可配對（同層或跨層皆可）。
+   路徑高度 = 兩張牌所在層的較高者：
+   ・涉及上層(第二層)的配對 → 只有上層的牌會擋路（連線飛越下層）
+   ・兩張都在下層 → 下層與上層的牌都會擋路
    下層牌被上層壓住時不可選取。 */
-function cellEmpty(r,c){ return S.grids[0][r][c]===0 && S.grids[1][r][c]===0; }
+function cellFree(plane,r,c){
+  return plane===1 ? S.grids[1][r][c]===0
+                   : (S.grids[0][r][c]===0 && S.grids[1][r][c]===0);
+}
 function exposedAt(l,r,c){ return l===1 || S.grids[1][r][c]===0; }
-function lineClear(r1,c1,r2,c2){ // 不含端點
+function lineClear(plane,r1,c1,r2,c2){ // 不含端點
   if (r1===r2){ const [a,b]=[Math.min(c1,c2),Math.max(c1,c2)];
-    for(let c=a+1;c<b;c++) if(!cellEmpty(r1,c)) return false; return true; }
+    for(let c=a+1;c<b;c++) if(!cellFree(plane,r1,c)) return false; return true; }
   if (c1===c2){ const [a,b]=[Math.min(r1,r2),Math.max(r1,r2)];
-    for(let r=a+1;r<b;r++) if(!cellEmpty(r,c1)) return false; return true; }
+    for(let r=a+1;r<b;r++) if(!cellFree(plane,r,c1)) return false; return true; }
   return false;
 }
 // 回傳路徑轉折點陣列（含兩端），找不到回傳 null
 function findPath(a, b){
   if (a.r===b.r && a.c===b.c) return null;
+  const P = Math.max(a.l||0, b.l||0); // 路徑高度
   // 0 轉彎
-  if ((a.r===b.r || a.c===b.c) && lineClear(a.r,a.c,b.r,b.c)) return [a,b];
+  if ((a.r===b.r || a.c===b.c) && lineClear(P,a.r,a.c,b.r,b.c)) return [a,b];
   // 1 轉彎
   const c1 = {r:a.r, c:b.c}, c2 = {r:b.r, c:a.c};
   for (const m of [c1,c2]){
-    if (cellEmpty(m.r,m.c) && lineClear(a.r,a.c,m.r,m.c) && lineClear(m.r,m.c,b.r,b.c))
+    if (cellFree(P,m.r,m.c) && lineClear(P,a.r,a.c,m.r,m.c) && lineClear(P,m.r,m.c,b.r,b.c))
       return [a,m,b];
   }
   // 2 轉彎：掃描所有行與列
@@ -371,20 +377,20 @@ function findPath(a, b){
   for (let c=0;c<C;c++){
     if (c===a.c || c===b.c) continue;
     const m1={r:a.r,c}, m2={r:b.r,c};
-    if (cellEmpty(m1.r,m1.c)&&cellEmpty(m2.r,m2.c)&&
-        lineClear(a.r,a.c,m1.r,m1.c)&&lineClear(m1.r,m1.c,m2.r,m2.c)&&lineClear(m2.r,m2.c,b.r,b.c))
+    if (cellFree(P,m1.r,m1.c)&&cellFree(P,m2.r,m2.c)&&
+        lineClear(P,a.r,a.c,m1.r,m1.c)&&lineClear(P,m1.r,m1.c,m2.r,m2.c)&&lineClear(P,m2.r,m2.c,b.r,b.c))
       return [a,m1,m2,b];
   }
   for (let r=0;r<R;r++){
     if (r===a.r || r===b.r) continue;
     const m1={r,c:a.c}, m2={r,c:b.c};
-    if (cellEmpty(m1.r,m1.c)&&cellEmpty(m2.r,m2.c)&&
-        lineClear(a.r,a.c,m1.r,m1.c)&&lineClear(m1.r,m1.c,m2.r,m2.c)&&lineClear(m2.r,m2.c,b.r,b.c))
+    if (cellFree(P,m1.r,m1.c)&&cellFree(P,m2.r,m2.c)&&
+        lineClear(P,a.r,a.c,m1.r,m1.c)&&lineClear(P,m1.r,m1.c,m2.r,m2.c)&&lineClear(P,m2.r,m2.c,b.r,b.c))
       return [a,m1,m2,b];
   }
   return null;
 }
-// 找任一可消除的配對（跨層皆可）
+// 找任一可消除的配對（同層/跨層皆可）
 function findAnyMove(){
   const byFace = {};
   for (const l of [1,0]) for (let r=1;r<=S.rows;r++) for (let c=1;c<=S.cols;c++){
