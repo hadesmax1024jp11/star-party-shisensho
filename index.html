@@ -128,8 +128,24 @@ html,body { width:100%; height:100%; overflow:hidden; font-family:"Baloo 2","Var
   pointer-events:none;
 }
 .tile img, .tile svg { width:78%; height:78%; pointer-events:none; filter:drop-shadow(0 2px 3px rgba(60,60,120,.3)); }
+.tile { z-index:10; }
+/* 上層牌：浮高一層、影子更深 */
+.tile.lay1 { z-index:30; transform:translateZ(24px); }
+.tile.lay1 .body {
+  background:linear-gradient(160deg,#fffef7 0%,#fdf6e3 45%,#efe0bd 100%);
+  box-shadow:
+    0 3px 0 #d9c48e, 0 6px 0 #c0aa74,
+    0 18px 22px rgba(70,80,160,.45),
+    inset 0 2px 4px #fffdf2, inset 0 -3px 6px rgba(170,150,100,.35);
+}
+/* 被壓住的下層牌：變暗、不可互動效果 */
+.tile.covered { cursor:default; }
+.tile.covered .body { filter:brightness(.62) saturate(.75); }
 .tile:hover { transform:translateZ(16px) scale(1.05); z-index:50; }
+.tile.lay1:hover { transform:translateZ(40px) scale(1.05); z-index:50; }
+.tile.covered:hover { transform:translateZ(0); z-index:10; }
 .tile.sel { transform:translateZ(26px) scale(1.1); z-index:55; animation:selBob .7s ease-in-out infinite alternate; }
+.tile.lay1.sel { transform:translateZ(48px) scale(1.1); }
 .tile.sel .body {
   background:linear-gradient(160deg,#fff9e0 0%,#ffe9a8 55%,#ffd54f 100%);
   box-shadow:
@@ -232,7 +248,7 @@ html,body { width:100%; height:100%; overflow:hidden; font-family:"Baloo 2","Var
     <img src="assets/char_bluejay.png" alt="藍鳹">
   </div>
   <button class="btn" id="startBtn">開始遊戲</button>
-  <div id="titleHint">配對兩張相同的牌，連線最多轉兩個彎即可消除！</div>
+  <div id="titleHint">雙層牌陣！配對同一層的兩張相同牌，連線最多轉兩個彎即可消除。先清上層、解鎖下層！</div>
 </div>
 
 <!-- 遊戲畫面 -->
@@ -303,18 +319,19 @@ const SVG_FACES = [
 ];
 const ALL_FACES = [...CHAR_FACES, ...SVG_FACES]; // 18 種
 
-/* ================= 關卡設定 ================= */
+/* ================= 關卡設定（雙層棋盤） ================= */
+// 下層鋪滿 cols×rows，上層置中覆蓋 (cols-4)×(rows-2)
 const LEVELS = [
-  { cols:8,  rows:5, types:8,  time:240 },
-  { cols:10, rows:6, types:11, time:270 },
-  { cols:12, rows:6, types:14, time:300 },
-  { cols:12, rows:7, types:16, time:330 },
-  { cols:14, rows:7, types:18, time:360 },
+  { cols:8,  rows:5, types:8,  time:280 },
+  { cols:10, rows:6, types:11, time:330 },
+  { cols:12, rows:6, types:14, time:380 },
+  { cols:12, rows:7, types:16, time:430 },
+  { cols:14, rows:7, types:18, time:480 },
 ];
 
 /* ================= 遊戲狀態 ================= */
 const S = {
-  level:0, score:0, grid:[], cols:0, rows:0,
+  level:0, score:0, grids:[], cols:0, rows:0, top:null,
   tileW:0, tileH:0, gap:0,
   sel:null, hints:3, shufs:3,
   combo:0, lastMatchAt:0,
@@ -324,25 +341,28 @@ const S = {
 const $ = id => document.getElementById(id);
 const boardEl = $("board"), pathSvg = $("pathSvg");
 
-/* ================= 連通判定（≤2 轉彎） =================
-   grid: (rows+2)x(cols+2)，外圈為空。0=空、其他=牌面編號 */
-function cellEmpty(r,c){ return S.grid[r][c] === 0; }
-function lineClear(r1,c1,r2,c2){ // 不含端點
+/* ================= 連通判定（≤2 轉彎，逐層獨立） =================
+   grids[l]: (rows+2)x(cols+2)，外圈為空。0=空、其他=牌面編號
+   規則：同層兩張相同牌才能相連；路徑只被同層的牌擋住。
+   下層牌被上層牌壓住時（同格有上層牌）不可選取。 */
+function cellEmpty(l,r,c){ return S.grids[l][r][c] === 0; }
+function exposedAt(l,r,c){ return l===1 || S.grids[1][r][c]===0; }
+function lineClear(l,r1,c1,r2,c2){ // 不含端點
   if (r1===r2){ const [a,b]=[Math.min(c1,c2),Math.max(c1,c2)];
-    for(let c=a+1;c<b;c++) if(!cellEmpty(r1,c)) return false; return true; }
+    for(let c=a+1;c<b;c++) if(!cellEmpty(l,r1,c)) return false; return true; }
   if (c1===c2){ const [a,b]=[Math.min(r1,r2),Math.max(r1,r2)];
-    for(let r=a+1;r<b;r++) if(!cellEmpty(r,c1)) return false; return true; }
+    for(let r=a+1;r<b;r++) if(!cellEmpty(l,r,c1)) return false; return true; }
   return false;
 }
 // 回傳路徑轉折點陣列（含兩端），找不到回傳 null
-function findPath(a, b){
+function findPath(l, a, b){
   if (a.r===b.r && a.c===b.c) return null;
   // 0 轉彎
-  if ((a.r===b.r || a.c===b.c) && lineClear(a.r,a.c,b.r,b.c)) return [a,b];
+  if ((a.r===b.r || a.c===b.c) && lineClear(l,a.r,a.c,b.r,b.c)) return [a,b];
   // 1 轉彎
   const c1 = {r:a.r, c:b.c}, c2 = {r:b.r, c:a.c};
   for (const m of [c1,c2]){
-    if (cellEmpty(m.r,m.c) && lineClear(a.r,a.c,m.r,m.c) && lineClear(m.r,m.c,b.r,b.c))
+    if (cellEmpty(l,m.r,m.c) && lineClear(l,a.r,a.c,m.r,m.c) && lineClear(l,m.r,m.c,b.r,b.c))
       return [a,m,b];
   }
   // 2 轉彎：掃描所有行與列
@@ -350,30 +370,32 @@ function findPath(a, b){
   for (let c=0;c<C;c++){ // 垂直中線在 c
     if (c===a.c || c===b.c) continue;
     const m1={r:a.r,c}, m2={r:b.r,c};
-    if (cellEmpty(m1.r,m1.c)&&cellEmpty(m2.r,m2.c)&&
-        lineClear(a.r,a.c,m1.r,m1.c)&&lineClear(m1.r,m1.c,m2.r,m2.c)&&lineClear(m2.r,m2.c,b.r,b.c))
+    if (cellEmpty(l,m1.r,m1.c)&&cellEmpty(l,m2.r,m2.c)&&
+        lineClear(l,a.r,a.c,m1.r,m1.c)&&lineClear(l,m1.r,m1.c,m2.r,m2.c)&&lineClear(l,m2.r,m2.c,b.r,b.c))
       return [a,m1,m2,b];
   }
   for (let r=0;r<R;r++){ // 水平中線在 r
     if (r===a.r || r===b.r) continue;
     const m1={r,c:a.c}, m2={r,c:b.c};
-    if (cellEmpty(m1.r,m1.c)&&cellEmpty(m2.r,m2.c)&&
-        lineClear(a.r,a.c,m1.r,m1.c)&&lineClear(m1.r,m1.c,m2.r,m2.c)&&lineClear(m2.r,m2.c,b.r,b.c))
+    if (cellEmpty(l,m1.r,m1.c)&&cellEmpty(l,m2.r,m2.c)&&
+        lineClear(l,a.r,a.c,m1.r,m1.c)&&lineClear(l,m1.r,m1.c,m2.r,m2.c)&&lineClear(l,m2.r,m2.c,b.r,b.c))
       return [a,m1,m2,b];
   }
   return null;
 }
-// 找任一可消除的配對
+// 找任一可消除的配對（優先上層）
 function findAnyMove(){
-  const byFace = {};
-  for (let r=1;r<=S.rows;r++) for (let c=1;c<=S.cols;c++){
-    const v = S.grid[r][c]; if(!v) continue;
-    (byFace[v] = byFace[v]||[]).push({r,c});
-  }
-  for (const k in byFace){
-    const arr = byFace[k];
-    for (let i=0;i<arr.length;i++) for (let j=i+1;j<arr.length;j++){
-      if (findPath(arr[i],arr[j])) return [arr[i],arr[j]];
+  for (const l of [1,0]){
+    const byFace = {};
+    for (let r=1;r<=S.rows;r++) for (let c=1;c<=S.cols;c++){
+      const v = S.grids[l][r][c]; if(!v || !exposedAt(l,r,c)) continue;
+      (byFace[v] = byFace[v]||[]).push({l,r,c});
+    }
+    for (const k in byFace){
+      const arr = byFace[k];
+      for (let i=0;i<arr.length;i++) for (let j=i+1;j<arr.length;j++){
+        if (findPath(l, arr[i], arr[j])) return [arr[i],arr[j]];
+      }
     }
   }
   return null;
@@ -383,19 +405,23 @@ function findAnyMove(){
 function genBoard(lv){
   const {cols,rows,types} = lv;
   S.cols=cols; S.rows=rows;
-  const total = cols*rows;
-  const faces = [];
-  for (let p=0;p<total/2;p++) faces.push(1 + p % types);
-  const bag = [...faces, ...faces];
+  const topCols = Math.max(2, cols-4), topRows = Math.max(1, rows-2);
+  const r0 = 1 + ((rows-topRows)>>1), c0 = 1 + ((cols-topCols)>>1);
+  S.top = { r0, c0, r1:r0+topRows-1, c1:c0+topCols-1 };
+  const mkBag = n => { const f=[]; for(let p=0;p<n/2;p++) f.push(1 + p%types); return [...f,...f]; };
+  const shuf = a => { for(let i=a.length-1;i>0;i--){ const j=Math.random()*(i+1)|0; [a[i],a[j]]=[a[j],a[i]]; } return a; };
+  const total0 = cols*rows, total1 = topCols*topRows;
   // 洗牌直到開局有解（最多 60 次）
   for (let t=0;t<60;t++){
-    for (let i=bag.length-1;i>0;i--){ const j=Math.random()* (i+1) |0; [bag[i],bag[j]]=[bag[j],bag[i]]; }
-    S.grid = Array.from({length:rows+2},()=>Array(cols+2).fill(0));
+    const bag0 = shuf(mkBag(total0)), bag1 = shuf(mkBag(total1));
+    S.grids = [0,1].map(()=>Array.from({length:rows+2},()=>Array(cols+2).fill(0)));
     let k=0;
-    for (let r=1;r<=rows;r++) for (let c=1;c<=cols;c++) S.grid[r][c]=bag[k++];
+    for (let r=1;r<=rows;r++) for (let c=1;c<=cols;c++) S.grids[0][r][c]=bag0[k++];
+    k=0;
+    for (let r=S.top.r0;r<=S.top.r1;r++) for (let c=S.top.c0;c<=S.top.c1;c++) S.grids[1][r][c]=bag1[k++];
     if (findAnyMove()) break;
   }
-  S.tilesLeft = total;
+  S.tilesLeft = total0 + total1;
 }
 function layoutBoard(){
   const stage = $("boardStage");
@@ -415,21 +441,25 @@ function cellXY(r,c){ // 格子中心（棋盤座標，r/c 含外圈）
   return { x:(c-1)*(S.tileW+S.gap)+S.tileW/2, y:(r-1)*(S.tileH+S.gap)+S.tileH/2 };
 }
 function placeTile(el){
-  const r=+el.dataset.r, c=+el.dataset.c;
+  const l=+el.dataset.l, r=+el.dataset.r, c=+el.dataset.c;
+  const off = l ? -Math.max(4, S.tileW*0.1) : 0; // 上層往左上偏移，露出下層邊緣
   el.style.width = S.tileW+"px"; el.style.height = S.tileH+"px";
-  el.style.left = (c-1)*(S.tileW+S.gap)+"px";
-  el.style.top  = (r-1)*(S.tileH+S.gap)+"px";
+  el.style.left = (c-1)*(S.tileW+S.gap)+off+"px";
+  el.style.top  = (r-1)*(S.tileH+S.gap)+off+"px";
   el.style.fontSize = S.tileW*0.5+"px";
 }
 function buildTiles(deal){
   for (const el of boardEl.querySelectorAll(".tile")) el.remove();
   let idx=0;
+  for (const l of [0,1])
   for (let r=1;r<=S.rows;r++) for (let c=1;c<=S.cols;c++){
-    const v = S.grid[r][c]; if(!v) continue;
+    const v = S.grids[l][r][c]; if(!v) continue;
     const el = document.createElement("div");
-    el.className = "tile" + (deal ? " dealIn" : "");
+    el.className = "tile" + (l ? " lay1" : "")
+      + ((l===0 && S.grids[1][r][c]) ? " covered" : "")
+      + (deal ? " dealIn" : "");
     if (deal) el.style.animationDelay = (idx*0.012)+"s";
-    el.dataset.r=r; el.dataset.c=c; el.dataset.v=v;
+    el.dataset.l=l; el.dataset.r=r; el.dataset.c=c; el.dataset.v=v;
     const body = document.createElement("div");
     body.className="body";
     const face = ALL_FACES[v-1];
@@ -441,26 +471,34 @@ function buildTiles(deal){
     idx++;
   }
 }
-function tileAt(r,c){
-  return boardEl.querySelector(`.tile[data-r="${r}"][data-c="${c}"]`);
+function tileAt(l,r,c){
+  return boardEl.querySelector(`.tile[data-l="${l}"][data-r="${r}"][data-c="${c}"]`);
 }
 /* ================= 互動 ================= */
 function onTile(el){
   if (!S.playing || el.classList.contains("vanish")) return;
-  ensureAudio(); sfxClick();
+  ensureAudio();
+  const l=+el.dataset.l, r=+el.dataset.r, c=+el.dataset.c;
+  if (l===0 && S.grids[1][r][c]){ // 被上層壓住，不可選
+    sfxFail();
+    el.classList.add("wrongShake");
+    setTimeout(()=>el.classList.remove("wrongShake"), 420);
+    return;
+  }
+  sfxClick();
   if (S.sel === el){ el.classList.remove("sel"); S.sel=null; return; }
   el.classList.remove("hintGlow");
   if (!S.sel){ S.sel = el; el.classList.add("sel"); return; }
-  const a = {r:+S.sel.dataset.r, c:+S.sel.dataset.c};
-  const b = {r:+el.dataset.r, c:+el.dataset.c};
-  if (S.sel.dataset.v !== el.dataset.v){
+  const a = {l:+S.sel.dataset.l, r:+S.sel.dataset.r, c:+S.sel.dataset.c};
+  const b = {l, r, c};
+  if (S.sel.dataset.v !== el.dataset.v || a.l !== b.l){ // 不同面或不同層
     sfxFail();
     S.sel.classList.remove("sel"); S.sel.classList.add("wrongShake"); el.classList.add("wrongShake");
     const olds=[S.sel, el]; setTimeout(()=>olds.forEach(t=>t.classList.remove("wrongShake")), 420);
     S.sel = el; el.classList.add("sel");
     return;
   }
-  const path = findPath(a,b);
+  const path = findPath(a.l, a, b);
   if (!path){
     sfxFail();
     S.sel.classList.remove("sel"); S.sel.classList.add("wrongShake"); el.classList.add("wrongShake");
@@ -482,7 +520,8 @@ function matchPair(elA, elB, path){
   showCombo();
   sfxMatch(S.combo);
   // 畫連線
-  drawPath(path);
+  const lay = +elA.dataset.l;
+  drawPath(path, lay);
   // 動畫消除
   elA.classList.remove("sel","hintGlow"); elB.classList.remove("hintGlow");
   elA.classList.add("vanish"); elB.classList.add("vanish");
@@ -490,9 +529,16 @@ function matchPair(elA, elB, path){
   for (const el of [elA, elB]) burstAt(el);
   floatScore(elB, "+"+gain);
   // 更新資料
-  S.grid[+elA.dataset.r][+elA.dataset.c] = 0;
-  S.grid[+elB.dataset.r][+elB.dataset.c] = 0;
+  S.grids[lay][+elA.dataset.r][+elA.dataset.c] = 0;
+  S.grids[lay][+elB.dataset.r][+elB.dataset.c] = 0;
   S.tilesLeft -= 2;
+  // 上層消除後，解鎖下層被壓住的牌
+  if (lay===1){
+    for (const el of [elA, elB]){
+      const under = tileAt(0, +el.dataset.r, +el.dataset.c);
+      if (under) under.classList.remove("covered");
+    }
+  }
   setTimeout(()=>{ elA.remove(); elB.remove(); }, 480);
   if (S.tilesLeft <= 0){ setTimeout(win, 650); return; }
   // 沒有可消的組合 → 自動洗牌
@@ -500,7 +546,8 @@ function matchPair(elA, elB, path){
     if (S.playing && !findAnyMove()){ banner("沒有可消的牌，自動洗牌！"); doShuffle(true); }
   }, 520);
 }
-function drawPath(path){
+function drawPath(path, lay){
+  pathSvg.style.transform = `translateZ(${lay ? 62 : 30}px)`;
   const pts = path.map(p=>cellXY(p.r,p.c));
   const d = pts.map((p,i)=>(i?"L":"M")+p.x+" "+p.y).join(" ");
   pathSvg.innerHTML = `
@@ -549,7 +596,7 @@ $("hintBtn").addEventListener("click", ()=>{
   ensureAudio(); sfxHint();
   S.hints--; updateHud();
   for (const p of mv){
-    const el = tileAt(p.r,p.c);
+    const el = tileAt(p.l,p.r,p.c);
     if (el){ el.classList.add("hintGlow"); setTimeout(()=>el.classList.remove("hintGlow"), 2600); }
   }
 });
@@ -561,16 +608,18 @@ $("shufBtn").addEventListener("click", ()=>{
 function doShuffle(free){
   ensureAudio(); sfxShuffle();
   S.sel = null;
-  const remain = [];
-  for (let r=1;r<=S.rows;r++) for (let c=1;c<=S.cols;c++)
-    if (S.grid[r][c]) remain.push(S.grid[r][c]);
-  const cells = [];
-  for (let r=1;r<=S.rows;r++) for (let c=1;c<=S.cols;c++)
-    if (S.grid[r][c]) cells.push({r,c});
+  // 每層各自重排（保持各層牌數與位置不變，只換牌面）
+  const vals=[[],[]], cells=[[],[]];
+  for (const l of [0,1])
+    for (let r=1;r<=S.rows;r++) for (let c=1;c<=S.cols;c++)
+      if (S.grids[l][r][c]){ vals[l].push(S.grids[l][r][c]); cells[l].push({r,c}); }
   // 重排直到有解
   for (let t=0;t<80;t++){
-    for (let i=remain.length-1;i>0;i--){ const j=Math.random()*(i+1)|0; [remain[i],remain[j]]=[remain[j],remain[i]]; }
-    cells.forEach((p,i)=>{ S.grid[p.r][p.c]=remain[i]; });
+    for (const l of [0,1]){
+      const a = vals[l];
+      for (let i=a.length-1;i>0;i--){ const j=Math.random()*(i+1)|0; [a[i],a[j]]=[a[j],a[i]]; }
+      cells[l].forEach((p,i)=>{ S.grids[l][p.r][p.c]=a[i]; });
+    }
     if (findAnyMove()) break;
   }
   // 動畫：舊牌飛出 → 新牌落下
