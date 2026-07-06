@@ -336,7 +336,7 @@ const S = {
   sel:null, hints:3, shufs:3,
   combo:0, lastMatchAt:0,
   timeLeft:0, timeMax:0, timerId:null,
-  playing:false, muted:false, tilesLeft:0,
+  playing:false, muted:false, tilesLeft:0, auto:false,
 };
 const $ = id => document.getElementById(id);
 const boardEl = $("board"), pathSvg = $("pathSvg");
@@ -475,7 +475,7 @@ function tileAt(l,r,c){
 }
 /* ================= 互動 ================= */
 function onTile(el){
-  if (!S.playing || el.classList.contains("vanish")) return;
+  if (!S.playing || S.auto || el.classList.contains("vanish")) return;
   ensureAudio();
   const l=+el.dataset.l, r=+el.dataset.r, c=+el.dataset.c;
   if (l===0 && S.grids[1][r][c]){ // 被上層壓住，不可選
@@ -539,10 +539,31 @@ function matchPair(elA, elB, path){
   }
   setTimeout(()=>{ elA.remove(); elB.remove(); }, 480);
   if (S.tilesLeft <= 0){ setTimeout(win, 650); return; }
+  // 剩最後三對 → 電腦自動完成收尾
+  if (!S.auto && S.tilesLeft <= 6){
+    S.auto = true;
+    banner("最後三步，自動完成！");
+    setTimeout(autoStep, 800);
+    return;
+  }
   // 沒有可消的組合 → 自動洗牌
   setTimeout(()=>{
-    if (S.playing && !findAnyMove()){ banner("沒有可消的牌，自動洗牌！"); doShuffle(true); }
+    if (S.playing && !S.auto && !findAnyMove()){ banner("沒有可消的牌，自動洗牌！"); doShuffle(true); }
   }, 520);
+}
+// 自動收尾：逐步找可消對並消除
+function autoStep(){
+  if (!S.playing || S.tilesLeft <= 0){ S.auto = false; return; }
+  const mv = findAnyMove();
+  if (!mv){ doShuffle(true); setTimeout(autoStep, 900); return; }
+  const elA = tileAt(mv[0].l, mv[0].r, mv[0].c);
+  const elB = tileAt(mv[1].l, mv[1].r, mv[1].c);
+  const path = findPath(mv[0], mv[1]);
+  if (elA && elB && path){
+    elA.classList.add("sel");
+    setTimeout(()=>matchPair(elA, elB, path), 260);
+  }
+  setTimeout(autoStep, 950);
 }
 function drawPath(path, lay){
   pathSvg.style.transform = `translateZ(${lay ? 62 : 30}px)`;
@@ -589,7 +610,7 @@ function banner(text){
 
 /* ================= 提示 / 洗牌 ================= */
 $("hintBtn").addEventListener("click", ()=>{
-  if (!S.playing || S.hints<=0) return;
+  if (!S.playing || S.auto || S.hints<=0) return;
   const mv = findAnyMove(); if (!mv) return;
   ensureAudio(); sfxHint();
   S.hints--; updateHud();
@@ -599,7 +620,7 @@ $("hintBtn").addEventListener("click", ()=>{
   }
 });
 $("shufBtn").addEventListener("click", ()=>{
-  if (!S.playing || S.shufs<=0) return;
+  if (!S.playing || S.auto || S.shufs<=0) return;
   S.shufs--; updateHud();
   doShuffle(false);
 });
@@ -662,7 +683,7 @@ function tick(){
 function startLevel(n){
   S.level = n;
   const lv = LEVELS[n];
-  S.hints = 3; S.shufs = 3; S.combo = 0; S.sel = null;
+  S.hints = 3; S.shufs = 3; S.combo = 0; S.sel = null; S.auto = false;
   S.timeMax = S.timeLeft = lv.time;
   genBoard(lv);
   $("gameScreen").classList.remove("hidden");
