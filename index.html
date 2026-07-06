@@ -178,6 +178,26 @@ html,body { width:100%; height:100%; overflow:hidden; font-family:"Baloo 2","Var
 .tile.shufOut { animation:shufOut .3s ease-in forwards; }
 @keyframes shufOut { to { transform:translateZ(160px) scale(.3) rotate(-120deg); opacity:0; } }
 
+/* ===== 功能牌 ===== */
+.tile.power .body {
+  background:linear-gradient(160deg,#f6e9ff 0%,#e3c2ff 45%,#c77dff 100%);
+  box-shadow:
+    0 3px 0 #9d4edd, 0 6px 0 #7b2cbf,
+    0 12px 18px rgba(123,44,191,.5),
+    inset 0 2px 4px #fcf6ff, inset 0 -3px 6px rgba(100,30,150,.35);
+}
+.tile.power { animation:powerGlow 1.3s ease-in-out infinite alternate; }
+.tile.power.covered { animation:none; }
+@keyframes powerGlow {
+  from { filter:drop-shadow(0 0 3px rgba(199,125,255,.4)); }
+  to   { filter:drop-shadow(0 0 14px rgba(199,125,255,.95)); }
+}
+.tile.powerBorn { animation:powerBorn .8s cubic-bezier(.2,1.4,.4,1); }
+@keyframes powerBorn {
+  0% { transform:translateZ(140px) scale(.2) rotate(200deg); }
+  100% { transform:translateZ(0) scale(1) rotate(0); }
+}
+
 /* ===== 結算彈窗 ===== */
 #overlay { z-index:80; background:rgba(50,40,110,.45); backdrop-filter:blur(6px); }
 #ovCard {
@@ -248,7 +268,7 @@ html,body { width:100%; height:100%; overflow:hidden; font-family:"Baloo 2","Var
     <img src="assets/char_bluejay.png" alt="藍鳹">
   </div>
   <button class="btn" id="startBtn">開始遊戲</button>
-  <div id="titleHint">雙層牌陣！上下層可互相配對消除，連線最多轉兩個彎、通道需完全淨空。清掉上層才能選下層！</div>
+  <div id="titleHint">雙層牌陣！上下層可互相配對，涉及上層的連線可飛越下層。紫色功能牌成對消除觸發特效：⏰加時、💥引爆、👑加分！</div>
 </div>
 
 <!-- 遊戲畫面 -->
@@ -259,7 +279,7 @@ html,body { width:100%; height:100%; overflow:hidden; font-family:"Baloo 2","Var
     <div class="hudItem"><span class="hudLabel">分數</span><span class="hudValue" id="hudScore">0</span></div>
     <span id="comboTag">COMBO ×2</span>
     <div id="timerWrap"><div id="timerBar"></div></div>
-    <button class="iconBtn" id="hintBtn" title="提示">💡<span class="cnt" id="hintCnt">3</span></button>
+    <button class="iconBtn" id="hintBtn" title="隨機消除一組">✨<span class="cnt" id="hintCnt">3</span></button>
     <button class="iconBtn" id="shufBtn" title="洗牌">🔄<span class="cnt" id="shufCnt">3</span></button>
     <button class="iconBtn" id="muteBtn" title="音效">🔊</button>
     <button class="iconBtn" id="homeBtn" title="回主選單">🏠</button>
@@ -318,6 +338,15 @@ const SVG_FACES = [
   { id:"planet", svg:`<svg viewBox="0 0 100 100"><defs>${g("gpl","#80deea","#00838f")}</defs><circle cx="50" cy="50" r="28" fill="url(#gpl)" stroke="#006064" stroke-width="3"/><circle cx="41" cy="43" r="7" fill="#4dd0e1" opacity=".8"/><circle cx="58" cy="60" r="5" fill="#4dd0e1" opacity=".8"/><ellipse cx="50" cy="52" rx="45" ry="13" fill="none" stroke="#ffd54f" stroke-width="5" transform="rotate(-16 50 52)"/><ellipse cx="41" cy="36" rx="9" ry="5" fill="#fff" opacity=".7"/></svg>` },
 ];
 const ALL_FACES = [...CHAR_FACES, ...SVG_FACES]; // 18 種
+
+/* ================= 功能牌（紫色特殊牌，成對消除觸發效果） ================= */
+const POWER_FACES = [
+  { id:"p_time", effect:"time", svg:`<svg viewBox="0 0 100 100"><defs><radialGradient id="gpt" cx="35%" cy="28%" r="80%"><stop offset="0%" stop-color="#fff"/><stop offset="100%" stop-color="#ffca28"/></radialGradient></defs><circle cx="50" cy="54" r="32" fill="url(#gpt)" stroke="#e6a700" stroke-width="4"/><circle cx="50" cy="54" r="24" fill="#fffde7" stroke="#f9a825" stroke-width="2"/><path d="M50 54 L50 38 M50 54 L62 60" stroke="#5d4037" stroke-width="4.5" stroke-linecap="round"/><circle cx="50" cy="54" r="3.5" fill="#5d4037"/><path d="M28 26 L18 34 M72 26 L82 34" stroke="#e6a700" stroke-width="7" stroke-linecap="round"/><ellipse cx="40" cy="40" rx="8" ry="4" fill="#fff" opacity=".8"/></svg>` },
+  { id:"p_zap", effect:"zap", svg:`<svg viewBox="0 0 100 100"><defs><radialGradient id="gpz" cx="35%" cy="30%" r="80%"><stop offset="0%" stop-color="#90a4ae"/><stop offset="100%" stop-color="#37474f"/></radialGradient></defs><circle cx="46" cy="60" r="28" fill="url(#gpz)" stroke="#263238" stroke-width="3"/><rect x="40" y="26" width="12" height="10" rx="3" fill="#546e7a"/><path d="M48 26 Q54 14 66 16" stroke="#8d6e63" stroke-width="4" fill="none" stroke-linecap="round"/><path d="M66 16 L72 8 M66 16 L76 16 M66 16 L70 24" stroke="#ffb300" stroke-width="3.5" stroke-linecap="round"/><circle cx="66" cy="16" r="4" fill="#ffd740"/><ellipse cx="36" cy="50" rx="9" ry="6" fill="#fff" opacity=".45"/></svg>` },
+  { id:"p_crown", effect:"score", svg:`<svg viewBox="0 0 100 100"><defs><radialGradient id="gpc" cx="35%" cy="28%" r="80%"><stop offset="0%" stop-color="#fff59d"/><stop offset="100%" stop-color="#f9a825"/></radialGradient></defs><path d="M18 74 L14 34 L34 50 L50 24 L66 50 L86 34 L82 74 Z" fill="url(#gpc)" stroke="#e65100" stroke-width="3.5" stroke-linejoin="round"/><rect x="18" y="72" width="64" height="10" rx="4" fill="#ffb300" stroke="#e65100" stroke-width="3"/><circle cx="50" cy="58" r="6" fill="#e91e63" stroke="#ad1457" stroke-width="2"/><circle cx="31" cy="60" r="4" fill="#42a5f5" stroke="#1565c0" stroke-width="2"/><circle cx="69" cy="60" r="4" fill="#66bb6a" stroke="#2e7d32" stroke-width="2"/><ellipse cx="36" cy="40" rx="9" ry="5" fill="#fff" opacity=".7" transform="rotate(-18 36 40)"/></svg>` },
+];
+function isPower(v){ return v >= 101; }
+function faceOf(v){ return isPower(v) ? POWER_FACES[v-101] : ALL_FACES[v-1]; }
 
 /* ================= 關卡設定（雙層棋盤） ================= */
 // 下層鋪滿 cols×rows，上層置中覆蓋 (cols-4)×(rows-2)
@@ -415,7 +444,8 @@ function genBoard(lv){
   S.top = { r0, c0, r1:r0+topRows-1, c1:c0+topCols-1 };
   const total = cols*rows + topCols*topRows;
   const faces = [];
-  for (let p=0;p<total/2;p++) faces.push(1 + p % types);
+  for (let p=0;p<total/2-3;p++) faces.push(1 + p % types);
+  for (let p=0;p<3;p++) faces.push(101 + p % POWER_FACES.length); // 三組功能牌
   const bag = [...faces, ...faces];
   // 洗牌直到開局有解（最多 60 次）
   for (let t=0;t<60;t++){
@@ -461,13 +491,14 @@ function buildTiles(deal){
     const v = S.grids[l][r][c]; if(!v) continue;
     const el = document.createElement("div");
     el.className = "tile" + (l ? " lay1" : "")
+      + (isPower(v) ? " power" : "")
       + ((l===0 && S.grids[1][r][c]) ? " covered" : "")
       + (deal ? " dealIn" : "");
     if (deal) el.style.animationDelay = (idx*0.012)+"s";
     el.dataset.l=l; el.dataset.r=r; el.dataset.c=c; el.dataset.v=v;
     const body = document.createElement("div");
     body.className="body";
-    const face = ALL_FACES[v-1];
+    const face = faceOf(v);
     body.innerHTML = face.img ? `<img src="${face.img}" draggable="false">` : face.svg;
     el.appendChild(body);
     el.addEventListener("pointerdown", ()=>onTile(el));
@@ -543,6 +574,9 @@ function matchPair(elA, elB, path){
       if (under) under.classList.remove("covered");
     }
   }
+  // 功能牌效果
+  const vv = +elA.dataset.v;
+  if (isPower(vv)) triggerPower(POWER_FACES[vv-101].effect, elB);
   setTimeout(()=>{ elA.remove(); elB.remove(); }, 480);
   if (S.tilesLeft <= 0){ setTimeout(win, 650); return; }
   // 剩最後三對 → 電腦自動完成收尾
@@ -570,6 +604,73 @@ function autoStep(){
     setTimeout(()=>matchPair(elA, elB, path), 260);
   }
   setTimeout(autoStep, 950);
+}
+/* ================= 功能牌效果 ================= */
+function triggerPower(effect, el){
+  if (effect === "time"){
+    S.timeLeft = Math.min(S.timeMax, S.timeLeft + 20);
+    const bar = $("timerBar");
+    bar.style.width = Math.max(0, S.timeLeft/S.timeMax*100) + "%";
+    banner("⏰ 時間 +20 秒！");
+    sfxHint();
+  } else if (effect === "score"){
+    S.score += 300; updateHud();
+    floatScore(el, "+300");
+    banner("👑 皇冠加分 +300！");
+    sfxHint();
+  } else if (effect === "zap"){
+    banner("💥 炸彈引爆一組！");
+    noise(.35, .25); tone(110, .45, "sawtooth", .2, 0, -60);
+    setTimeout(zapRandomPair, 650);
+  }
+  // 刪除功能牌後 → 隨機補充一組新功能牌
+  setTimeout(spawnPowerPair, 950);
+}
+// 隨機消除一組（提示鍵 / 炸彈共用）：任兩張曝露同面牌，無視路徑
+function zapRandomPair(){
+  if (!S.playing || S.tilesLeft <= 0) return;
+  const byFace = {};
+  for (const l of [1,0]) for (let r=1;r<=S.rows;r++) for (let c=1;c<=S.cols;c++){
+    const v = S.grids[l][r][c]; if(!v || !exposedAt(l,r,c)) continue;
+    (byFace[v] = byFace[v]||[]).push({l,r,c});
+  }
+  const groups = Object.values(byFace).filter(a=>a.length>=2);
+  if (!groups.length) return;
+  const grp = groups[Math.random()*groups.length|0];
+  const i = Math.random()*grp.length|0;
+  let j = Math.random()*grp.length|0;
+  while (j===i) j = (j+1) % grp.length;
+  const A = grp[i], B = grp[j];
+  const elA = tileAt(A.l,A.r,A.c), elB = tileAt(B.l,B.r,B.c);
+  if (elA && elB) matchPair(elA, elB, [A, B]);
+}
+// 把場上一組隨機普通同面牌變成功能牌
+function spawnPowerPair(){
+  if (!S.playing || S.tilesLeft <= 8) return;
+  const byFace = {};
+  for (const l of [0,1]) for (let r=1;r<=S.rows;r++) for (let c=1;c<=S.cols;c++){
+    const v = S.grids[l][r][c]; if(!v || isPower(v)) continue;
+    (byFace[v] = byFace[v]||[]).push({l,r,c});
+  }
+  const cand = Object.values(byFace).filter(a=>a.length>=2);
+  if (!cand.length) return;
+  const arr = cand[Math.random()*cand.length|0];
+  const i = Math.random()*arr.length|0;
+  let j = Math.random()*arr.length|0;
+  while (j===i) j = (j+1) % arr.length;
+  const pv = 101 + (Math.random()*POWER_FACES.length|0);
+  for (const p of [arr[i], arr[j]]){
+    S.grids[p.l][p.r][p.c] = pv;
+    const el = tileAt(p.l, p.r, p.c);
+    if (el){
+      el.dataset.v = pv;
+      el.classList.add("power","powerBorn");
+      el.querySelector(".body").innerHTML = POWER_FACES[pv-101].svg;
+      setTimeout(()=>el.classList.remove("powerBorn"), 900);
+    }
+  }
+  banner("🎁 新功能牌出現！");
+  sfxHint();
 }
 function drawPath(path, lay){
   pathSvg.style.transform = `translateZ(${lay ? 62 : 30}px)`;
@@ -617,13 +718,10 @@ function banner(text){
 /* ================= 提示 / 洗牌 ================= */
 $("hintBtn").addEventListener("click", ()=>{
   if (!S.playing || S.auto || S.hints<=0) return;
-  const mv = findAnyMove(); if (!mv) return;
   ensureAudio(); sfxHint();
   S.hints--; updateHud();
-  for (const p of mv){
-    const el = tileAt(p.l,p.r,p.c);
-    if (el){ el.classList.add("hintGlow"); setTimeout(()=>el.classList.remove("hintGlow"), 2600); }
-  }
+  banner("✨ 隨機消除一組！");
+  setTimeout(zapRandomPair, 350);
 });
 $("shufBtn").addEventListener("click", ()=>{
   if (!S.playing || S.auto || S.shufs<=0) return;
